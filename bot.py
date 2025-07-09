@@ -36,7 +36,6 @@ async def sign_selected(message: types.Message):
 async def forecast_handler(message: types.Message):
     user_id = message.from_user.id
     period = message.text
-    text = message.text
     sign = "неизвестный знак"
     async for m in bot.iter_history(message.chat.id, limit=5):
         if m.text in SIGNS:
