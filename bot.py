@@ -1,69 +1,96 @@
 import logging
-import asyncio
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
-from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-import openai
 import os
+from aiogram import Bot, Dispatcher, F
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
+from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from openai import OpenAI
+from dotenv import load_dotenv
 
-BOT_TOKEN = "8021267990:AAE4VmVO_gGsf2_01PD3E73FQ0qwPzRPZLw"
-OPENAI_API_KEY = "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"
+load_dotenv()
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# ✅ Новый способ инициализации бота
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-SIGNS = ["овен", "телец", "близнецы", "рак", "лев", "дева",
-         "весы", "скорпион", "стрелец", "козерог", "водолей", "рыбы"]
-PERIODS = {"1": "сегодня", "3": "на 3 дня", "7": "на неделю"}
+signs = [
+    "Овен", "Телец", "Близнецы", "Рак", "Лев", "Дева",
+    "Весы", "Скорпион", "Стрелец", "Козерог", "Водолей", "Рыбы"
+]
 
-def build_prompt(sign: str, period: str) -> str:
-    return (
-        f"Составь уникальный гороскоп для знака {sign} {period}. "
-        "Кратко, вдохновляюще, без шаблонов."
-    )
+periods = {
+    "Сегодня": "today",
+    "3 дня": "3days",
+    "Неделя": "week"
+}
 
-@dp.message(CommandStart())
+
+def get_sign_buttons():
+    builder = InlineKeyboardBuilder()
+    for sign in signs:
+        builder.button(text=sign, callback_data=f"sign:{sign}")
+    builder.adjust(3)
+    return builder.as_markup()
+
+
+def get_period_buttons(sign: str):
+    builder = InlineKeyboardBuilder()
+    for title, key in periods.items():
+        builder.button(text=title, callback_data=f"period:{key}:{sign}")
+    builder.adjust(3)
+    return builder.as_markup()
+
+
+@dp.message(Command("start"))
 async def start(message: Message):
     await message.answer(
-        "🔮 Привет! Напиши знак зодиака и на сколько дней нужен прогноз (1, 3 или 7).\n"
-        "Пример: <b>рак 3</b>"
+        "🔮 Добро пожаловать в AI-гороскоп бот!\nВыберите ваш знак зодиака:",
+        reply_markup=get_sign_buttons()
     )
 
-@dp.message(F.text)
-async def handle_message(message: Message):
-    parts = message.text.strip().lower().split()
-    if len(parts) != 2 or parts[0] not in SIGNS or parts[1] not in PERIODS:
-        await message.answer(
-            "Неверный формат.\n"
-            "Введите, например: <b>овен 1</b>"
-        )
-        return
 
-    sign, p = parts
-    await message.answer("🔄 Генерирую прогноз...")
+@dp.callback_query(F.data.startswith("sign:"))
+async def choose_sign(callback):
+    sign = callback.data.split(":")[1]
+    await callback.message.edit_text(
+        f"🕒 Вы выбрали <b>{sign}</b>. На какой период хотите гороскоп?",
+        reply_markup=get_period_buttons(sign)
+    )
+
+
+@dp.callback_query(F.data.startswith("period:"))
+async def send_horoscope(callback):
+    _, period, sign = callback.data.split(":")
+    prompt = (
+        f"Составь уникальный гороскоп на {period} для знака зодиака {sign}. "
+        f"Он должен быть интересным, вдохновляющим и не повторяться, без шаблонов."
+    )
+
+    await callback.message.edit_text("🔮 Генерирую гороскоп...")
 
     try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # или GPT‑4, если доступен
-            messages=[{"role": "user", "content": build_prompt(sign, PERIODS[p])}],
-            temperature=0.8,
-            max_tokens=200
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.8
         )
-        forecast = resp.choices[0].message.content
-        await message.answer(
-            f"🔮 Гороскоп {PERIODS[p]} для <b>{sign.title()}</b>:\n\n{forecast}"
-        )
+        forecast = response.choices[0].message.content
     except Exception as e:
-        logging.exception(e)
-        await message.answer("❌ Ошибка генерации. Попробуйте позже.")
+        forecast = f"Произошла ошибка при генерации гороскопа 😢\n\n{str(e)}"
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    await dp.start_polling(bot)
+    await callback.message.answer(f"🔮 Гороскоп на {period} для {sign}:\n\n{forecast}")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    logging.basicConfig(level=logging.INFO)
+    dp.run_polling(bot)
