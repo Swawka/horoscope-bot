@@ -53,9 +53,8 @@ async def forecast_handler(message: types.Message):
             messages=[{"role": "user", "content": prompt}]
         )
         forecast = response.choices[0].message.content
-        await message.answer(f"🔮 Гороскоп на {period} для {sign}:\n\n{result}")
+       await message.answer(f"🔮 Гороскоп на {period} для {sign}:\n\n{forecast}")
 
-{forecast}")
         await message.answer(f"Осталось бесплатных прогнозов: {free_uses[user_id]}")
     else:
         await message.answer("❗ Вы использовали 3 бесплатных прогноза.
